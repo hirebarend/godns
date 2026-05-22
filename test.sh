@@ -86,9 +86,16 @@ run "A ns2 (glue)"     "ns2.godns.co.za"      A     NOERROR  "192\\.0\\.2\\.11"
 run "A mail"           "mail.godns.co.za"     A     NOERROR  "192\\.0\\.2\\.20"
 run "NODATA AAAA www"  "www.godns.co.za"      AAAA  NOERROR  "SOA"
 run "NXDOMAIN child"   "missing.godns.co.za"  A     NXDOMAIN "SOA"
+
+run "A barend apex"    "barenderasmus.com"    A     NOERROR  "192\\.0\\.2\\.100"
+run "SOA barend"       "barenderasmus.com"    SOA   NOERROR  "ns1\\.godns\\.co\\.za\\..*hostmaster\\.barenderasmus\\.com"
+run "NS barend"        "barenderasmus.com"    NS    NOERROR  "ns[12]\\.godns\\.co\\.za"
+run "NXDOMAIN barend"  "missing.barenderasmus.com" A NXDOMAIN "SOA"
+
 run "REFUSED out-zone" "example.com"          A     REFUSED
 
-aa_flag_check         "AA on apex A"          "godns.co.za"          A
+aa_flag_check         "AA on godns apex A"    "godns.co.za"          A
+aa_flag_check         "AA on barend apex A"   "barenderasmus.com"    A
 
 echo "----------------------------------------------------------------"
 echo "Passed: $pass    Failed: $fail"

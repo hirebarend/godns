@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -12,49 +11,26 @@ import (
 	"github.com/miekg/dns"
 )
 
-const (
-	zone       = "godns.co.za."
-	defaultTTL = 300
+const defaultTTL = 300
+
+type zoneData struct {
+	origin string
+	soa    *dns.SOA
+}
+
+var (
+	zones   []*zoneData
+	records []dns.RR
 )
 
-var records []dns.RR
-
-func hdr(name string, rrtype uint16) dns.RR_Header {
-	return dns.RR_Header{
-		Name:   name,
-		Rrtype: rrtype,
-		Class:  dns.ClassINET,
-		Ttl:    defaultTTL,
+func matchZone(qname string) *zoneData {
+	var best *zoneData
+	for _, z := range zones {
+		if strings.HasSuffix(qname, z.origin) && (best == nil || len(z.origin) > len(best.origin)) {
+			best = z
+		}
 	}
-}
-
-func soa() *dns.SOA {
-	return &dns.SOA{
-		Hdr:     hdr(zone, dns.TypeSOA),
-		Ns:      "ns1.godns.co.za.",
-		Mbox:    "hostmaster.godns.co.za.",
-		Serial:  2026052201,
-		Refresh: 7200,
-		Retry:   3600,
-		Expire:  1209600,
-		Minttl:  3600,
-	}
-}
-
-func init() {
-	records = []dns.RR{
-		soa(),
-		&dns.NS{Hdr: hdr(zone, dns.TypeNS), Ns: "ns1.godns.co.za."},
-		&dns.NS{Hdr: hdr(zone, dns.TypeNS), Ns: "ns2.godns.co.za."},
-		&dns.A{Hdr: hdr(zone, dns.TypeA), A: net.ParseIP("192.0.2.1")},
-		&dns.AAAA{Hdr: hdr(zone, dns.TypeAAAA), AAAA: net.ParseIP("2001:db8::1")},
-		&dns.MX{Hdr: hdr(zone, dns.TypeMX), Preference: 10, Mx: "mail.godns.co.za."},
-		&dns.TXT{Hdr: hdr(zone, dns.TypeTXT), Txt: []string{"v=spf1 -all"}},
-		&dns.A{Hdr: hdr("www.godns.co.za.", dns.TypeA), A: net.ParseIP("192.0.2.2")},
-		&dns.A{Hdr: hdr("ns1.godns.co.za.", dns.TypeA), A: net.ParseIP("192.0.2.10")},
-		&dns.A{Hdr: hdr("ns2.godns.co.za.", dns.TypeA), A: net.ParseIP("192.0.2.11")},
-		&dns.A{Hdr: hdr("mail.godns.co.za.", dns.TypeA), A: net.ParseIP("192.0.2.20")},
-	}
+	return best
 }
 
 func nameExists(qname string) bool {
@@ -79,10 +55,10 @@ func findAnswers(qname string, qtype uint16) []dns.RR {
 	return out
 }
 
-func nsRRs() []dns.RR {
+func nsRRsFor(origin string) []dns.RR {
 	var out []dns.RR
 	for _, rr := range records {
-		if rr.Header().Rrtype == dns.TypeNS {
+		if rr.Header().Rrtype == dns.TypeNS && strings.EqualFold(rr.Header().Name, origin) {
 			out = append(out, rr)
 		}
 	}
@@ -103,7 +79,8 @@ func handle(w dns.ResponseWriter, r *dns.Msg) {
 	q := r.Question[0]
 	qname := strings.ToLower(q.Name)
 
-	if !strings.HasSuffix(qname, zone) {
+	z := matchZone(qname)
+	if z == nil {
 		m.SetRcode(r, dns.RcodeRefused)
 		_ = w.WriteMsg(m)
 		return
@@ -115,12 +92,12 @@ func handle(w dns.ResponseWriter, r *dns.Msg) {
 	switch {
 	case len(answers) > 0:
 		m.Answer = answers
-		m.Ns = nsRRs()
+		m.Ns = nsRRsFor(z.origin)
 	case nameExists(qname):
-		m.Ns = []dns.RR{soa()}
+		m.Ns = []dns.RR{z.soa}
 	default:
 		m.SetRcode(r, dns.RcodeNameError)
-		m.Ns = []dns.RR{soa()}
+		m.Ns = []dns.RR{z.soa}
 	}
 
 	if err := w.WriteMsg(m); err != nil {
@@ -128,24 +105,62 @@ func handle(w dns.ResponseWriter, r *dns.Msg) {
 	}
 }
 
+func zoneOrigins() []string {
+	out := make([]string, len(zones))
+	for i, z := range zones {
+		out[i] = z.origin
+	}
+	return out
+}
+
 func main() {
-	addr := flag.String("addr", ":15353", "listen address (use :53 for privileged mode)")
+	configPath := flag.String("config", "godns.yaml", "path to operator config YAML")
+	zonesPath := flag.String("zones", "zones.yaml", "path to community zones YAML")
+	addrOverride := flag.String("addr", "", "listen address (overrides server.addr from config)")
 	flag.Parse()
 
-	dns.HandleFunc(zone, handle)
+	opCfg, err := loadOperatorConfig(*configPath)
+	if err != nil {
+		log.Fatalf("operator config: %v", err)
+	}
+	pubCfg, err := loadPublicConfig(*zonesPath)
+	if err != nil {
+		log.Fatalf("public config: %v", err)
+	}
+
+	opZone, opRRs, err := opCfg.build()
+	if err != nil {
+		log.Fatalf("operator zone: %v", err)
+	}
+	pubZones, pubRRs, err := pubCfg.build(opZone.origin, opCfg.Zone.PrimaryNS, opCfg.Zone.Nameservers, opCfg.Zone.Serial)
+	if err != nil {
+		log.Fatalf("public zones: %v", err)
+	}
+
+	zones = append([]*zoneData{opZone}, pubZones...)
+	records = append(opRRs, pubRRs...)
+
+	addr := *addrOverride
+	if addr == "" {
+		addr = opCfg.Server.Addr
+	}
+	if addr == "" {
+		log.Fatalf("listen address not set (server.addr in %s or -addr flag)", *configPath)
+	}
+
 	dns.HandleFunc(".", handle)
 
-	udp := &dns.Server{Addr: *addr, Net: "udp"}
-	tcp := &dns.Server{Addr: *addr, Net: "tcp"}
+	udp := &dns.Server{Addr: addr, Net: "udp"}
+	tcp := &dns.Server{Addr: addr, Net: "tcp"}
 
 	go func() {
-		log.Printf("godns listening udp %s zone=%s", *addr, zone)
+		log.Printf("godns listening udp %s zones=%v", addr, zoneOrigins())
 		if err := udp.ListenAndServe(); err != nil {
 			log.Fatalf("udp: %v", err)
 		}
 	}()
 	go func() {
-		log.Printf("godns listening tcp %s zone=%s", *addr, zone)
+		log.Printf("godns listening tcp %s zones=%v", addr, zoneOrigins())
 		if err := tcp.ListenAndServe(); err != nil {
 			log.Fatalf("tcp: %v", err)
 		}

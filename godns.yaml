@@ -1,0 +1,46 @@
+# godns.yaml — operator config for the godns nameserver.
+# Owned by the maintainers; not for community edits.
+# Community contributions live in zones.yaml.
+
+server:
+  addr: ":15353"
+
+zone:
+  origin: godns.co.za
+  primary_ns: ns1.godns.co.za
+  hostmaster: hostmaster.godns.co.za
+  serial: 2026052201
+  ttl: 300
+
+  # Nameservers advertised for both this zone and every community zone in zones.yaml.
+  nameservers:
+    - ns1.godns.co.za
+    - ns2.godns.co.za
+
+  # SOA + NS are managed by the server based on the fields above and must not appear here.
+  records:
+    - name: "@"
+      type: A
+      value: 192.0.2.1
+    - name: "@"
+      type: AAAA
+      value: "2001:db8::1"
+    - name: "@"
+      type: MX
+      priority: 10
+      value: mail.godns.co.za.
+    - name: "@"
+      type: TXT
+      value: "v=spf1 -all"
+    - name: www
+      type: A
+      value: 192.0.2.2
+    - name: ns1
+      type: A
+      value: 192.0.2.10
+    - name: ns2
+      type: A
+      value: 192.0.2.11
+    - name: mail
+      type: A
+      value: 192.0.2.20

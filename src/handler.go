@@ -18,10 +18,17 @@ func handler(config *config, responseWriter dns.ResponseWriter, requestMsg *dns.
 		return
 	}
 
+	for _, question := range requestMsg.Question {
+		log.Printf(
+			"query client=%s name=%s type=%s class=%s",
+			responseWriter.RemoteAddr(),
+			question.Name,
+			dns.TypeToString[question.Qtype],
+			dns.ClassToString[question.Qclass],
+		)
+	}
+
 	question := requestMsg.Question[0]
-
-	log.Printf("question.Name: %s", question.Name)
-
 	zone := config.findZone(question.Name)
 
 	if zone == nil {

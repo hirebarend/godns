@@ -60,8 +60,8 @@ func handler(config *config, responseWriter dns.ResponseWriter, requestMsg *dns.
 	if ok {
 		responseMsg.SetRcode(requestMsg, dns.RcodeSuccess)
 		responseMsg.Authoritative = true
-		responseMsg.Answer = []dns.RR{zone.findSoaRecord()}
-		responseMsg.Ns = zone.findNsRecords()
+		responseMsg.Answer = []dns.RR{}
+		responseMsg.Ns = []dns.RR{zone.findSoaRecord()}
 
 		_ = responseWriter.WriteMsg(responseMsg)
 
@@ -70,8 +70,8 @@ func handler(config *config, responseWriter dns.ResponseWriter, requestMsg *dns.
 
 	responseMsg.SetRcode(requestMsg, dns.RcodeNameError)
 	responseMsg.Authoritative = true
-	responseMsg.Answer = []dns.RR{zone.findSoaRecord()}
-	responseMsg.Ns = []dns.RR{}
+	responseMsg.Answer = []dns.RR{}
+	responseMsg.Ns = []dns.RR{zone.findSoaRecord()}
 
 	_ = responseWriter.WriteMsg(responseMsg)
 }

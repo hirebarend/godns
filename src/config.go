@@ -120,11 +120,14 @@ func (zone zone) findSoaRecord() dns.RR {
 
 func (config *config) findZone(qname string) *zone {
 	var best *zone
+	qname = strings.ToLower(dns.Fqdn(qname))
 
 	for i := range config.Zones {
 		zone := &config.Zones[i]
+		origin := strings.ToLower(dns.Fqdn(zone.Origin))
+		matchesZone := qname == origin || strings.HasSuffix(qname, "."+origin)
 
-		if strings.HasSuffix(qname, zone.Origin) && (best == nil || len(zone.Origin) > len(best.Origin)) {
+		if matchesZone && (best == nil || len(origin) > len(dns.Fqdn(best.Origin))) {
 			best = zone
 		}
 	}
@@ -133,11 +136,14 @@ func (config *config) findZone(qname string) *zone {
 }
 
 func (zone zone) getRecordKey(questionName string) string {
-	if questionName == zone.Origin {
+	questionName = strings.ToLower(dns.Fqdn(questionName))
+	origin := strings.ToLower(dns.Fqdn(zone.Origin))
+
+	if questionName == origin {
 		return "@"
 	}
 
-	return strings.TrimSuffix(questionName, "."+zone.Origin)
+	return strings.TrimSuffix(questionName, "."+origin)
 }
 
 func (recordSet recordSet) toRRs(zone zone, name string) ([]dns.RR, error) {

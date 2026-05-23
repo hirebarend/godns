@@ -1,7 +1,5 @@
-# godns.yaml - config for the godns nameserver.
-
 server:
-  addr: ":15353"
+  addr: ":53"
 
 zones:
   - origin: godns.co.za.
@@ -11,43 +9,28 @@ zones:
         soa:
           ns: ns1.godns.co.za.
           mbox: hostmaster.godns.co.za.
-          serial: 2026052201
+          serial: 2026052301
         ns:
           - ns1.godns.co.za.
           - ns2.godns.co.za.
-        a:
-          - 192.0.2.1
-        aaaa:
-          - "2001:db8::1"
-        mx:
-          - preference: 10
-            host: mail.godns.co.za.
-        txt:
-          - "v=spf1 -all"
-      www:
-        a:
-          - 192.0.2.2
       ns1:
         a:
           - 192.0.2.10
       ns2:
         a:
           - 192.0.2.11
-      mail:
-        a:
-          - 192.0.2.20
 
-  - origin: barenderasmus.com.
-    ttl: 300
-    records:
-      "@":
-        soa:
-          ns: ns1.godns.co.za.
-          mbox: hostmaster.barenderasmus.com.
-          serial: 2026052201
-        ns:
-          - ns1.godns.co.za.
-          - ns2.godns.co.za.
-        cname: barenderasmus-com.web.app.
-        a:
-          - 192.0.2.100
+  # - origin: barenderasmus.com.
+  #   ttl: 300
+  #   records:
+  #     "@":
+  #       soa:
+  #         ns: ns1.godns.co.za.
+  #         mbox: hostmaster.barenderasmus.com.
+  #         serial: 2026052201
+  #       ns:
+  #         - ns1.godns.co.za.
+  #         - ns2.godns.co.za.
+  #       cname: barenderasmus-com.web.app.
+  #       a:
+  #         - 192.0.2.100

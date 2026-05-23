@@ -7,17 +7,15 @@ zones:
     records:
       "@":
         soa:
-          ns: ns1.godns.co.za.
+          ns: ns1.barenderasmus.com.
           mbox: hostmaster.godns.co.za.
           serial: 2026052301
         ns:
-          - ns1.godns.co.za.
-          - ns2.godns.co.za.
-      ns1:
+          - ns1.barenderasmus.com.
+          - ns2.barenderasmus.com.
+      api:
         a:
           - 46.101.233.116
-      ns2:
-        a:
           - 165.22.73.121
 
   # - origin: barenderasmus.com.

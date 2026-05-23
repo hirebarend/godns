@@ -6,7 +6,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-func handler(config *dnsConfig, responseWriter dns.ResponseWriter, requestMsg *dns.Msg) {
+func handler(cfg *config, responseWriter dns.ResponseWriter, requestMsg *dns.Msg) {
 	responseMsg := new(dns.Msg)
 	responseMsg.SetReply(requestMsg)
 	responseMsg.Compress = true
@@ -22,7 +22,8 @@ func handler(config *dnsConfig, responseWriter dns.ResponseWriter, requestMsg *d
 
 	qname := dns.Fqdn(strings.ToLower(question.Name))
 
-	zone := config.matchZone(qname)
+	zone := cfg.findZone(qname)
+
 	if zone == nil {
 		responseMsg.SetRcode(requestMsg, dns.RcodeRefused)
 		responseMsg.Authoritative = false
@@ -34,24 +35,24 @@ func handler(config *dnsConfig, responseWriter dns.ResponseWriter, requestMsg *d
 		return
 	}
 
-	answers := config.findAnswers(qname, question.Qtype)
+	answers := zone.findAnswers(qname, question.Qtype)
 
 	if len(answers) > 0 {
 		responseMsg.SetRcode(requestMsg, dns.RcodeSuccess)
 		responseMsg.Authoritative = true
 		responseMsg.Answer = answers
-		responseMsg.Ns = config.nsRecordsFor(zone.origin)
+		responseMsg.Ns = zone.findNsRecords()
 
 		_ = responseWriter.WriteMsg(responseMsg)
 
 		return
 	}
 
-	if config.nameExists(qname) {
+	if zone.nameExists(qname) {
 		responseMsg.SetRcode(requestMsg, dns.RcodeSuccess)
 		responseMsg.Authoritative = true
-		responseMsg.Answer = []dns.RR{zone.soa}
-		responseMsg.Ns = config.nsRecordsFor(zone.origin)
+		responseMsg.Answer = []dns.RR{zone.findSoaRecord()}
+		responseMsg.Ns = zone.findNsRecords()
 
 		_ = responseWriter.WriteMsg(responseMsg)
 
@@ -60,48 +61,21 @@ func handler(config *dnsConfig, responseWriter dns.ResponseWriter, requestMsg *d
 
 	responseMsg.SetRcode(requestMsg, dns.RcodeNameError)
 	responseMsg.Authoritative = true
-	responseMsg.Answer = []dns.RR{zone.soa}
+	responseMsg.Answer = []dns.RR{zone.findSoaRecord()}
 	responseMsg.Ns = []dns.RR{}
 
 	_ = responseWriter.WriteMsg(responseMsg)
 }
 
-func (c *dnsConfig) matchZone(qname string) *zoneData {
-	var best *zoneData
-	for _, z := range c.zones {
-		if strings.HasSuffix(qname, z.origin) && (best == nil || len(z.origin) > len(best.origin)) {
-			best = z
-		}
-	}
-	return best
+func (z zone) nameExists(qname string) bool {
+	_, ok := z.recordSetFor(qname)
+	return ok
 }
 
-func (c *dnsConfig) nameExists(qname string) bool {
-	for _, rr := range c.records {
-		if strings.EqualFold(rr.Header().Name, qname) {
-			return true
-		}
-	}
-	return false
-}
-
-func (c *dnsConfig) findAnswers(qname string, qtype uint16) []dns.RR {
+func (z zone) findAnswers(qname string, qtype uint16) []dns.RR {
 	var out []dns.RR
-	for _, rr := range c.records {
-		if !strings.EqualFold(rr.Header().Name, qname) {
-			continue
-		}
+	for _, rr := range z.recordsFor(qname) {
 		if qtype == dns.TypeANY || rr.Header().Rrtype == qtype {
-			out = append(out, rr)
-		}
-	}
-	return out
-}
-
-func (c *dnsConfig) nsRecordsFor(origin string) []dns.RR {
-	var out []dns.RR
-	for _, rr := range c.records {
-		if rr.Header().Rrtype == dns.TypeNS && strings.EqualFold(rr.Header().Name, origin) {
 			out = append(out, rr)
 		}
 	}

@@ -48,5 +48,6 @@ zones:
         ns:
           - ns1.godns.co.za.
           - ns2.godns.co.za.
+        cname: barenderasmus-com.web.app.
         a:
           - 192.0.2.100

@@ -1,12 +1,12 @@
 package main
 
 import (
-	"strings"
+	"log"
 
 	"github.com/miekg/dns"
 )
 
-func handler(cfg *config, responseWriter dns.ResponseWriter, requestMsg *dns.Msg) {
+func handler(config *config, responseWriter dns.ResponseWriter, requestMsg *dns.Msg) {
 	responseMsg := new(dns.Msg)
 	responseMsg.SetReply(requestMsg)
 	responseMsg.Compress = true
@@ -20,9 +20,9 @@ func handler(cfg *config, responseWriter dns.ResponseWriter, requestMsg *dns.Msg
 
 	question := requestMsg.Question[0]
 
-	qname := dns.Fqdn(strings.ToLower(question.Name))
+	log.Printf("question.Name: %s", question.Name)
 
-	zone := cfg.findZone(qname)
+	zone := config.findZone(question.Name)
 
 	if zone == nil {
 		responseMsg.SetRcode(requestMsg, dns.RcodeRefused)
@@ -35,12 +35,21 @@ func handler(cfg *config, responseWriter dns.ResponseWriter, requestMsg *dns.Msg
 		return
 	}
 
-	answers := zone.findAnswers(qname, question.Qtype)
+	recordSet, ok := zone.Records[zone.getRecordKey(question.Name)]
 
-	if len(answers) > 0 {
+	rrs, _ := recordSet.toRRs(*zone, question.Name)
+
+	var out []dns.RR
+	for _, rr := range rrs {
+		if question.Qtype == dns.TypeANY || rr.Header().Rrtype == question.Qtype {
+			out = append(out, rr)
+		}
+	}
+
+	if len(out) > 0 {
 		responseMsg.SetRcode(requestMsg, dns.RcodeSuccess)
 		responseMsg.Authoritative = true
-		responseMsg.Answer = answers
+		responseMsg.Answer = out
 		responseMsg.Ns = zone.findNsRecords()
 
 		_ = responseWriter.WriteMsg(responseMsg)
@@ -48,7 +57,7 @@ func handler(cfg *config, responseWriter dns.ResponseWriter, requestMsg *dns.Msg
 		return
 	}
 
-	if zone.nameExists(qname) {
+	if ok {
 		responseMsg.SetRcode(requestMsg, dns.RcodeSuccess)
 		responseMsg.Authoritative = true
 		responseMsg.Answer = []dns.RR{zone.findSoaRecord()}
@@ -65,19 +74,4 @@ func handler(cfg *config, responseWriter dns.ResponseWriter, requestMsg *dns.Msg
 	responseMsg.Ns = []dns.RR{}
 
 	_ = responseWriter.WriteMsg(responseMsg)
-}
-
-func (z zone) nameExists(qname string) bool {
-	_, ok := z.recordSetFor(qname)
-	return ok
-}
-
-func (z zone) findAnswers(qname string, qtype uint16) []dns.RR {
-	var out []dns.RR
-	for _, rr := range z.recordsFor(qname) {
-		if qtype == dns.TypeANY || rr.Header().Rrtype == qtype {
-			out = append(out, rr)
-		}
-	}
-	return out
 }

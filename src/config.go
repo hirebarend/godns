@@ -63,112 +63,109 @@ func loadConfig(path string) (*config, error) {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
-	var c config
-	dec := yaml.NewDecoder(strings.NewReader(string(data)))
-	dec.KnownFields(true)
-	if err := dec.Decode(&c); err != nil {
+	var config config
+	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&config); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 
-	return &c, nil
+	return &config, nil
 }
 
-func (z zone) findNsRecords() []dns.RR {
+func (zone zone) findNsRecords() []dns.RR {
+	recordSet, ok := zone.Records[zone.getRecordKey(zone.Origin)]
+
+	if !ok {
+		return nil
+	}
+
+	rrs, err := recordSet.toRRs(zone, "@")
+
+	if err != nil {
+		return nil
+	}
+
 	var out []dns.RR
-	origin := z.origin()
-	for _, rr := range z.recordsFor(origin) {
-		if rr.Header().Rrtype == dns.TypeNS && strings.EqualFold(rr.Header().Name, origin) {
+
+	for _, rr := range rrs {
+		if rr.Header().Rrtype == dns.TypeNS && strings.EqualFold(rr.Header().Name, zone.Origin) {
 			out = append(out, rr)
 		}
 	}
+
 	return out
 }
 
-func (z zone) findSoaRecord() dns.RR {
-	origin := z.origin()
-	for _, rr := range z.recordsFor(origin) {
-		if rr.Header().Rrtype == dns.TypeSOA && strings.EqualFold(rr.Header().Name, origin) {
+func (zone zone) findSoaRecord() dns.RR {
+	recordSet, ok := zone.Records[zone.getRecordKey(zone.Origin)]
+
+	if !ok {
+		return nil
+	}
+
+	rrs, err := recordSet.toRRs(zone, "@")
+
+	if err != nil {
+		return nil
+	}
+
+	for _, rr := range rrs {
+		if rr.Header().Rrtype == dns.TypeSOA && strings.EqualFold(rr.Header().Name, zone.Origin) {
 			return rr
 		}
 	}
 	return nil
 }
 
-func (c *config) findZone(qname string) *zone {
+func (config *config) findZone(qname string) *zone {
 	var best *zone
-	for i := range c.Zones {
-		z := &c.Zones[i]
-		origin := z.origin()
-		if strings.HasSuffix(qname, origin) && (best == nil || len(origin) > len(best.origin())) {
-			best = z
+
+	for i := range config.Zones {
+		zone := &config.Zones[i]
+
+		if strings.HasSuffix(qname, zone.Origin) && (best == nil || len(zone.Origin) > len(best.Origin)) {
+			best = zone
 		}
 	}
+
 	return best
 }
 
-func (z zone) origin() string {
-	return dns.Fqdn(strings.ToLower(strings.TrimSpace(z.Origin)))
-}
-
-func (z zone) recordKey(qname string) string {
-	qname = dns.Fqdn(strings.ToLower(strings.TrimSpace(qname)))
-	origin := z.origin()
-	if qname == origin {
+func (zone zone) getRecordKey(questionName string) string {
+	if questionName == zone.Origin {
 		return "@"
 	}
 
-	return strings.TrimSuffix(qname, "."+origin)
+	return strings.TrimSuffix(questionName, "."+zone.Origin)
 }
 
-func (z zone) recordSetFor(qname string) (recordSet, bool) {
-	records, ok := z.Records[z.recordKey(qname)]
-	return records, ok
-}
-
-func (z zone) recordsFor(qname string) []dns.RR {
-	records, ok := z.recordSetFor(qname)
-	if !ok {
-		return nil
-	}
-
-	rrs, err := records.resourceRecords(z, z.recordKey(qname))
-	if err != nil {
-		return nil
-	}
-
-	return rrs
-}
-
-func (rs recordSet) resourceRecords(zone zone, name string) ([]dns.RR, error) {
-	ttl := orDefault(rs.TTL, orDefault(zone.TTL, defaultTTL))
-	owner := fqdn(name, zone.origin())
-	header := dns.RR_Header{Name: owner, Class: dns.ClassINET, Ttl: ttl}
+func (recordSet recordSet) toRRs(zone zone, name string) ([]dns.RR, error) {
+	ttl := orDefault(recordSet.TTL, orDefault(zone.TTL, defaultTTL))
+	header := dns.RR_Header{Name: buildFqdn(name, zone.Origin), Class: dns.ClassINET, Ttl: ttl}
 
 	var out []dns.RR
-	if rs.SOA != nil {
-		if owner != zone.origin() {
-			return nil, fmt.Errorf("soa must be defined at @")
-		}
+	if recordSet.SOA != nil {
 		out = append(out, &dns.SOA{
 			Hdr:     headerWithType(header, dns.TypeSOA),
-			Ns:      dns.Fqdn(strings.ToLower(rs.SOA.NS)),
-			Mbox:    dns.Fqdn(strings.ToLower(rs.SOA.Mbox)),
-			Serial:  rs.SOA.Serial,
-			Refresh: orDefault(rs.SOA.Refresh, defaultRefresh),
-			Retry:   orDefault(rs.SOA.Retry, defaultRetry),
-			Expire:  orDefault(rs.SOA.Expire, defaultExpire),
-			Minttl:  orDefault(rs.SOA.MinTTL, defaultMinTTL),
+			Ns:      dns.Fqdn(strings.ToLower(recordSet.SOA.NS)),
+			Mbox:    dns.Fqdn(strings.ToLower(recordSet.SOA.Mbox)),
+			Serial:  recordSet.SOA.Serial,
+			Refresh: orDefault(recordSet.SOA.Refresh, defaultRefresh),
+			Retry:   orDefault(recordSet.SOA.Retry, defaultRetry),
+			Expire:  orDefault(recordSet.SOA.Expire, defaultExpire),
+			Minttl:  orDefault(recordSet.SOA.MinTTL, defaultMinTTL),
 		})
 	}
 
-	for _, ns := range rs.NS {
+	for _, ns := range recordSet.NS {
 		out = append(out, &dns.NS{
 			Hdr: headerWithType(header, dns.TypeNS),
 			Ns:  dns.Fqdn(strings.ToLower(ns)),
 		})
 	}
 
-	for _, value := range rs.A {
+	for _, value := range recordSet.A {
 		ip := net.ParseIP(value)
 		if ip == nil || ip.To4() == nil {
 			return nil, fmt.Errorf("a value %q is not a valid IPv4 address", value)
@@ -179,7 +176,7 @@ func (rs recordSet) resourceRecords(zone zone, name string) ([]dns.RR, error) {
 		})
 	}
 
-	for _, value := range rs.AAAA {
+	for _, value := range recordSet.AAAA {
 		ip := net.ParseIP(value)
 		if ip == nil || ip.To4() != nil {
 			return nil, fmt.Errorf("aaaa value %q is not a valid IPv6 address", value)
@@ -190,14 +187,14 @@ func (rs recordSet) resourceRecords(zone zone, name string) ([]dns.RR, error) {
 		})
 	}
 
-	if rs.CNAME != "" {
+	if recordSet.CNAME != "" {
 		out = append(out, &dns.CNAME{
 			Hdr:    headerWithType(header, dns.TypeCNAME),
-			Target: dns.Fqdn(strings.ToLower(rs.CNAME)),
+			Target: dns.Fqdn(strings.ToLower(recordSet.CNAME)),
 		})
 	}
 
-	for _, mx := range rs.MX {
+	for _, mx := range recordSet.MX {
 		out = append(out, &dns.MX{
 			Hdr:        headerWithType(header, dns.TypeMX),
 			Preference: mx.Preference,
@@ -205,7 +202,7 @@ func (rs recordSet) resourceRecords(zone zone, name string) ([]dns.RR, error) {
 		})
 	}
 
-	for _, txt := range rs.TXT {
+	for _, txt := range recordSet.TXT {
 		out = append(out, &dns.TXT{
 			Hdr: headerWithType(header, dns.TypeTXT),
 			Txt: []string{txt},
@@ -215,27 +212,7 @@ func (rs recordSet) resourceRecords(zone zone, name string) ([]dns.RR, error) {
 	return out, nil
 }
 
-func fqdn(name, zoneOrigin string) string {
-	zoneOrigin = dns.Fqdn(strings.ToLower(zoneOrigin))
-	name = strings.ToLower(strings.TrimSpace(name))
-
-	if name == "" || name == "@" {
-		return zoneOrigin
-	}
-	if strings.HasSuffix(name, ".") {
-		return name
-	}
-	return name + "." + zoneOrigin
-}
-
 func headerWithType(header dns.RR_Header, recordType uint16) dns.RR_Header {
 	header.Rrtype = recordType
 	return header
-}
-
-func orDefault(v, d uint32) uint32 {
-	if v == 0 {
-		return d
-	}
-	return v
 }

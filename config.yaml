@@ -15,10 +15,10 @@ zones:
           - ns2.godns.co.za.
       ns1:
         a:
-          - 192.0.2.10
+          - 46.101.233.116
       ns2:
         a:
-          - 192.0.2.11
+          - 165.22.73.121
 
   # - origin: barenderasmus.com.
   #   ttl: 300
